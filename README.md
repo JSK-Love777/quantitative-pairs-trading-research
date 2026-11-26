@@ -73,14 +73,19 @@ The original R Markdown files and rendered HTML are provided as evidence of the 
 **Financial Analytics:** Pairs Trading, Statistical Arbitrage, Backtesting, Financial Risk & Performance Evaluation
 
 
+
+
 ## Project Files
 
 | File | Description |
 |---|---|
-| [Research Portfolio Report](team7_final_report.pdf) | Research methodology, findings, visualizations, and limitations |
-| [Main R Analysis](analysis/pairs_trading_main.Rmd) | Cointegration analysis, statistical modeling, and GLD/IAU backtesting |
-| [Supplementary Analysis](analysis/threshold_sensitivity.Rmd) | Additional asset-pair experiments and trading-parameter analysis |
-| [Rendered R Analysis](results/pairs_trading_analysis.html) | HTML report containing R code outputs, statistical diagnostics, and visualizations |
+| **[Final - Report.pdf](Final%20-%20Report.pdf)** | Research methodology, key findings, visualizations, and financial risk interpretation |
+| **[Final - Trading analysis.pdf](Final%20-%20Trading%20analysis.pdf)** | Complete R analysis, statistical testing, trading signals, and backtesting results |
+| [Main R Source Code](analysis/pairs_trading_main.Rmd) | Main statistical modeling and backtesting source code |
+| [Supplementary R Analysis](analysis/threshold_sensitivity.Rmd) | Additional asset-pair experiments and parameter analysis |
+| [Original HTML Analysis](results/pairs_trading_analysis.html) | Original rendered R analysis document |
+
+
 
 
 ## Project Attribution
