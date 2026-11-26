@@ -1,0 +1,644 @@
+---
+title: "Draft_Group7 : Pair Trading Strategy"
+output: html_document
+---
+
+We’ve first conducted a data analysis focusing on the relationship between Group A: Visa and Mastercard; Group B: Coca-Cola and Pepsi.
+
+# 2. Data Description
+
+Monthly adjusted closing price data for Visa (V) and Mastercard (MA) ; Coca_Cola (KO) and Pepsi (PEP) was collected from Yahoo Finance for the period between January 2019 and January 2024. Adjusted closing prices were chosen because they account for dividends and stock splits, providing accurate reflections of true market performance.
+
+```{r setup, include=FALSE}
+library(quantmod)
+library(xts)
+library(dplyr)
+library(zoo)
+library(PerformanceAnalytics)
+library(urca)
+install.packages("egcm")
+install.packages("KFAS")
+
+start_date <- as.Date("2019-01-01")
+end_date   <- as.Date("2024-01-01")
+
+# Group A:
+getSymbols("V", src = "yahoo", from = start_date, to = end_date, periodicity = "monthly")
+getSymbols("MA", src = "yahoo", from = start_date, to = end_date, periodicity = "monthly")
+
+V_adj <- Ad(V)
+MA_adj <- Ad(MA)
+
+prices_V_MA <- merge(V_adj, MA_adj)
+colnames(prices_V_MA) <- c("V", "MA")
+
+# Group B:
+getSymbols("KO", src = "yahoo", from = start_date, to = end_date, periodicity = "monthly")
+getSymbols("PEP", src = "yahoo", from = start_date, to = end_date, periodicity = "monthly")
+
+KO_adj <- Ad(KO)
+PEP_adj <- Ad(PEP)
+
+prices_KO_PEP <- merge(KO_adj, PEP_adj)
+colnames(prices_KO_PEP) <- c("KO", "PEP")
+
+# Group C:
+getSymbols("GLD", src = "yahoo", from = start_date, to = end_date, periodicity = "monthly")
+getSymbols("IAU", src = "yahoo", from = start_date, to = end_date, periodicity = "monthly")
+
+GLD_adj <- Ad(GLD)
+IAU_adj <- Ad(IAU)
+
+prices_GLD_IAU <- merge(GLD_adj, IAU_adj)
+colnames(prices_GLD_IAU) <- c("GLD", "IAU")
+
+
+# Verification of Cointegrated Time Series Stability for Further Analysis (Group C)
+library(egcm)
+
+# Engle-Granger Cointegration Test for Group C (GLD & IAU)
+egcm_test_GLD_IAU <- egcm(prices_GLD_IAU$GLD, prices_GLD_IAU$IAU)
+summary(egcm_test_GLD_IAU)
+
+# Residual stability check
+residual_GLD_IAU <- prices_GLD_IAU$GLD - egcm_test_GLD_IAU$beta * prices_GLD_IAU$IAU - egcm_test_GLD_IAU$alpha
+plot(residual_GLD_IAU, type="l", main="Engle-Granger Cointegration Residuals (GLD & IAU)", col="blue")
+abline(h=mean(residual_GLD_IAU), col="red", lwd=2)
+```
+
+```{r}
+head(prices_V_MA)
+summary(prices_V_MA)
+
+plot(prices_V_MA, main = "Monthly Adjusted Closing Prices for V and MA", col = c("blue", "red"))
+```
+
+```{r}
+head(prices_KO_PEP)
+summary(prices_KO_PEP)
+
+plot(prices_KO_PEP, main = "Monthly Adjusted Closing Prices for KO and PEP", col = c("blue", "red"))
+```
+
+```{r}
+head(prices_GLD_IAU)
+summary(prices_GLD_IAU)
+
+plot(prices_GLD_IAU, main = "Monthly Adjusted Closing Prices for GLD and IAU", col = c("gold", "darkorange"))
+```
+
+# 3. Methodology
+
+## 3.1 Cointegration Test
+
+The Johansen cointegration test was performed to assess whether Visa and Mastercard share a statistically significant long-term equilibrium relationship.
+
+```{r}
+# Group A: 
+GroupA_test <- ca.jo(prices_V_MA, type = "trace", ecdet = "const", K = 2)
+summary(GroupA_test)
+```
+
+The test results indicate a statistically significant cointegration relationship, meaning these two assets tend to revert toward a long-run equilibrium. The identified cointegration relationship is:
+
+\[
+V - 0.5453 \times MA - 23.6470 = 0
+\]
+
+```{r}
+# Group B: 
+GroupB_test <- ca.jo(prices_KO_PEP, type = "trace", ecdet = "const", K = 2)
+summary(GroupB_test)
+```
+
+The test results also indicate a cointegration relationship, these two assets tend to revert toward a long-run equilibrium. The identified cointegration relationship is:
+
+\[
+V - 0.2682 \times MA - 12.5970 = 0
+\]
+
+```{r}
+# Group C:
+GroupC_test <- ca.jo(prices_GLD_IAU, type = "trace", ecdet = "const", K = 2)
+summary(GroupC_test)
+```
+
+The residual analysis plot for Group C (GLD & IAU) demonstrates that the cointegration relationship is stable over time, as the residuals fluctuate around the mean without significant divergence. This supports the long-term equilibrium relationship between the two gold ETFs.
+
+
+\[
+GLD - \beta \times IAU + \alpha = 0
+\]
+
+
+
+## 3.2 Spread Calculation and Trading Signals
+To enhance adaptability to changing market conditions, we recommend employing a Kalman Filter-based time-varying cointegration estimation method instead of the conventional fixed-parameter approach. This allows for more accurate prediction of the spread and facilitates the generation of more stable and consistent returns
+
+#Group A Visa and Mastercard:
+
+The spread is calculated as:
+
+\[
+\text{spread} = V - 0.5453 \times MA - 23.6470
+\]
+
+A rolling mean and standard deviation with a 12-month window were computed to capture yearly market trends and minimize short-term volatility. The Z-score was calculated by:
+
+\[
+Z = \frac{\text{spread} - \text{rolling mean}}{\text{rolling standard deviation}}
+\]
+
+Trading signals based on Z-scores:
+
+- **Long (1):** when \( Z < -1 \)
+
+- **Short (-1):** when \( Z > 1 \)
+
+- **No Position (0):** otherwise
+
+```{r}
+beta <- 0.5453
+const_termA <- 23.6470
+
+spreadA <- prices_V_MA[, "V"] - beta * prices_V_MA[, "MA"] - const_termA
+
+spread_meanA <- rollapply(spreadA, width = 12, FUN = mean, align = "right", fill = NA)
+spread_sdA <- rollapply(spreadA, width = 12, FUN = sd, align = "right", fill = NA)
+
+z_scoreA <- (spreadA - spread_meanA) / spread_sdA
+
+signalsA <- ifelse(z_scoreA < -1, 1, ifelse(z_scoreA > 1, -1, 0))
+signalsA <- xts(signalsA, order.by = index(z_scoreA))
+
+plot(z_scoreA, main = "Z-Score with Trading Signals", ylab = "Z-Score")
+points(index(z_scoreA)[which(signalsA==1)], z_scoreA[signalsA==1], col = "green", pch = 16)
+points(index(z_scoreA)[which(signalsA==-1)], z_scoreA[signalsA==-1], col = "red", pch = 16)
+```
+
+Trading signals were lagged by one period to simulate realistic trading conditions. Strategy returns were computed as follows:
+
+\[
+\text{strategy_return} = \frac{\text{lagged signal} \times \Delta \text{spread}}{\text{lagged spread}}
+\]
+
+Cumulative returns and key performance metrics, including the annualized Sharpe Ratio and Maximum Drawdown, were calculated:
+
+```{r}
+lag_signalsA <- xts(dplyr::lag(coredata(signalsA), n = 1), order.by = index(signalsA))
+lag_spreadA <- xts(dplyr::lag(coredata(spreadA), n = 1), order.by = index(spreadA))
+spread_diffA <- diff(spreadA)
+strategy_returnsA <- na.omit(lag_signalsA * spread_diffA / lag_spreadA)
+
+cumulative_returnsA <- cumprod(1 + strategy_returnsA) - 1
+plot(cumulative_returnsA, main = "Cumulative Strategy Returns Group A", ylab = "Cumulative Returns Group A")
+
+sharpe_A <- SharpeRatio.annualized(strategy_returnsA, Rf = 0)
+mdd_A <- maxDrawdown(strategy_returnsA)
+
+sharpe_A
+mdd_A
+```
+
+#Group B Coca-Cola and Pepsi:
+
+The spread is calculated as:
+
+\[
+\text{spread} = V - 0.2682 \times MA - 12.5970
+\]
+
+A rolling mean and standard deviation with a 12-month window were computed to capture yearly market trends and minimize short-term volatility. The Z-score was calculated by:
+
+\[
+Z = \frac{\text{spread} - \text{rolling mean}}{\text{rolling standard deviation}}
+\]
+
+Trading signals based on Z-scores:
+
+- **Long (1):** when \( Z < -1 \)
+
+- **Short (-1):** when \( Z > 1 \)
+
+- **No Position (0):** otherwise
+
+```{r, error=FALSE}
+beta <- 0.2682
+const_termB <- 12.5970
+
+spreadB <- prices_KO_PEP[, "KO"] - beta * prices_KO_PEP[, "PEP"] - const_termB
+
+spread_meanB <- rollapply(spreadB, width = 12, FUN = mean, align = "right", fill = NA)
+spread_sdB <- rollapply(spreadB, width = 12, FUN = sd, align = "right", fill = NA)
+
+z_scoreB <- (spreadB - spread_meanB) / spread_sdB
+
+signalsB <- ifelse(z_scoreB < -1, 1, ifelse(z_scoreB > 1, -1, 0))
+signalsB <- xts(signalsB, order.by = index(z_scoreB))
+
+plot(z_scoreB, main = "Z-Score with Trading Signals", ylab = "Z-Score")
+points(index(z_scoreB)[which(signalsB==1)], z_scoreB[signalsB==1], col = "green", pch = 16)
+points(index(z_scoreB)[which(signalsB==-1)], z_scoreB[signalsB==-1], col = "red", pch = 16)
+```
+
+Cumulative returns:
+
+```{r}
+lag_signalsB <- xts(dplyr::lag(coredata(signalsB), n = 1), order.by = index(signalsB))
+lag_spreadB <- xts(dplyr::lag(coredata(spreadB), n = 1), order.by = index(spreadB))
+spread_diffB <- diff(spreadB)
+strategy_returnsB <- na.omit(lag_signalsB * spread_diffB / lag_spreadB)
+
+cumulative_returnsB <- cumprod(1 + strategy_returnsB) - 1
+plot(cumulative_returnsB, main = "Cumulative Strategy Returns Group B", ylab = "Cumulative Returns Group B")
+
+sharpe_B <- SharpeRatio.annualized(strategy_returnsB, Rf = 0)
+mdd_B <- maxDrawdown(strategy_returnsB)
+
+sharpe_B
+mdd_B
+```
+
+Initial results indicate negative performance, suggesting the need to refine strategy parameters further.
+
+
+```{r}
+### Group C: GLD and IAU Pair Trading Strategy
+
+# Assume we already have GLD_adj, IAU_adj as xts from getSymbols
+prices_GLD_IAU <- merge(GLD_adj, IAU_adj)
+colnames(prices_GLD_IAU) <- c("GLD", "IAU")
+
+# Engle-Granger cointegration test
+library(egcm)
+egcm_test_C <- egcm(prices_GLD_IAU$GLD, prices_GLD_IAU$IAU)
+summary(egcm_test_C)
+
+# Safest cointegration status check
+if (inherits(egcm_test_C, "egcm") && !is.null(egcm_test_C$coint)) {
+  if (!egcm_test_C$coint) {
+    message("WARNING: GLD and IAU are not cointegrated. Proceed with caution.")
+  } else {
+    message("GLD and IAU appear to be cointegrated.")
+  }
+} else {
+  message("WARNING: cointegration status unknown - check egcm_test_C structure or class.")
+}
+
+
+# Extract beta, alpha
+beta_C  <- as.numeric(coef(egcm_test_C)["beta"])
+alpha_C <- as.numeric(coef(egcm_test_C)["alpha"])
+
+```
+
+
+
+
+
+# 4. Demonstration of Kalman Filter Implementation
+
+By utilizing the Kalman Filter to estimate time-varying cointegration coefficients, we enhance the accuracy of spread prediction in pair trading strategies.
+
+```{r}
+library(KFAS)
+
+Y <- log(prices_V_MA)
+model <- SSModel(Y[,1] ~ Y[,2], H = NA)
+fit <- fitSSM(model, inits = c(0.1, 0.1), method = "BFGS")
+kfs_result <- KFS(fit$model)
+
+spread_kalman <- Y[,1] - coef(kfs_result)[,2] * Y[,2]
+
+plot(spread_kalman, main = "Kalman Filter Estimated Spread for Visa & Mastercard", ylab = "Kalman Spread")
+```
+
+```{r}
+# Group A: Visa & Mastercard
+beta <- 0.5453
+const_termA <- 23.6470
+spreadA <- prices_V_MA[, "V"] - beta * prices_V_MA[, "MA"] - const_termA
+
+spread_meanA <- rollapply(spreadA, width = 12, FUN = mean, align = "right", fill = NA)
+spread_sdA <- rollapply(spreadA, width = 12, FUN = sd, align = "right", fill = NA)
+z_scoreA <- (spreadA - spread_meanA) / spread_sdA
+
+# Group B: Coca-Cola & Pepsi
+beta <- 0.2682
+const_termB <- 12.5970
+spreadB <- prices_KO_PEP[, "KO"] - beta * prices_KO_PEP[, "PEP"] - const_termB
+
+spread_meanB <- rollapply(spreadB, width = 12, FUN = mean, align = "right", fill = NA)
+spread_sdB <- rollapply(spreadB, width = 12, FUN = sd, align = "right", fill = NA)
+z_scoreB <- (spreadB - spread_meanB) / spread_sdB
+```
+
+```{r}
+# Group C: GLD & IAU (based on Kalman Filter)
+library(KFAS)
+
+Y_C <- log(prices_GLD_IAU)
+model_C <- SSModel(Y_C[,1] ~ Y_C[,2], H = NA)
+fit_C <- fitSSM(model_C, inits = c(0.1, 0.1), method = "BFGS")
+kfs_result_C <- KFS(fit_C$model)
+
+spread_kalman_C <- Y_C[,1] - coef(kfs_result_C)[,2] * Y_C[,2]
+
+plot(spread_kalman_C, main = "Kalman Filter Estimated Spread for GLD & IAU", ylab = "Kalman Spread")
+
+beta_C <- mean(coef(kfs_result_C)[,2], na.rm = TRUE)
+const_termC <- mean(coef(kfs_result_C)[,1], na.rm = TRUE)
+
+spreadC <- prices_GLD_IAU[, "GLD"] - beta_C * prices_GLD_IAU[, "IAU"] - const_termC
+
+spread_meanC <- rollapply(spreadC, width = 12, FUN = mean, align = "right", fill = NA)
+spread_sdC <- rollapply(spreadC, width = 12, FUN = sd, align = "right", fill = NA)
+z_scoreC <- (spreadC - spread_meanC) / spread_sdC
+
+signalsC <- ifelse(z_scoreC < -1, 1, ifelse(z_scoreC > 1, -1, 0))
+signalsC <- xts(signalsC, order.by = index(z_scoreC))
+
+plot(z_scoreC, main = "Z-Score with Trading Signals (GLD & IAU)", ylab = "Z-Score")
+points(index(z_scoreC)[which(signalsC==1)], z_scoreC[signalsC==1], col = "green", pch = 16)
+points(index(z_scoreC)[which(signalsC==-1)], z_scoreC[signalsC==-1], col = "red", pch = 16)
+
+lag_signalsC <- xts(dplyr::lag(coredata(signalsC), n = 1), order.by = index(signalsC))
+lag_spreadC <- xts(dplyr::lag(coredata(spreadC), n = 1), order.by = index(spreadC))
+spread_diffC <- diff(spreadC)
+strategy_returnsC <- na.omit(lag_signalsC * spread_diffC / lag_spreadC)
+
+cumulative_returnsC <- cumprod(1 + strategy_returnsC) - 1
+plot(cumulative_returnsC, main = "Cumulative Strategy Returns Group C (GLD & IAU)", ylab = "Cumulative Returns")
+
+sharpe_C <- SharpeRatio.annualized(strategy_returnsC, Rf = 0)
+mdd_C <- maxDrawdown(strategy_returnsC)
+
+sharpe_C
+mdd_C
+
+
+```
+
+
+
+
+
+# 5. Performance Metrics Calculation
+To evaluate the performance of the pair trading strategy, we compute the following five key performance metrics.
+```{r}
+# Group A
+signalsA <- ifelse(z_scoreA < -1, 1, ifelse(z_scoreA > 1, -1, 0))
+signalsA <- xts(signalsA, order.by = index(z_scoreA))
+
+# Group B
+signalsB <- ifelse(z_scoreB < -1, 1, ifelse(z_scoreB > 1, -1, 0))
+signalsB <- xts(signalsB, order.by = index(z_scoreB))
+
+# Group C
+signalsC <- ifelse(z_scoreC < -1, 1, ifelse(z_scoreC > 1, -1, 0))
+signalsC <- xts(signalsC, order.by = index(z_scoreC))
+
+# Group A returns Calculation
+lag_signalsA <- xts(dplyr::lag(coredata(signalsA), n = 1), order.by = index(signalsA))
+lag_spreadA <- xts(dplyr::lag(coredata(spreadA), n = 1), order.by = index(spreadA))
+spread_diffA <- diff(spreadA)
+strategy_returnsA <- na.omit(lag_signalsA * spread_diffA / lag_spreadA)
+
+# Group B returns Calculation
+lag_signalsB <- xts(dplyr::lag(coredata(signalsB), n = 1), order.by = index(signalsB))
+lag_spreadB <- xts(dplyr::lag(coredata(spreadB), n = 1), order.by = index(spreadB))
+spread_diffB <- diff(spreadB)
+strategy_returnsB <- na.omit(lag_signalsB * spread_diffB / lag_spreadB)
+
+# Group C returns Calculation
+lag_signalsC <- xts(dplyr::lag(coredata(signalsC), n = 1), order.by = index(signalsC))
+lag_spreadC <- xts(dplyr::lag(coredata(spreadC), n = 1), order.by = index(spreadC))
+spread_diffC <- diff(spreadC)
+strategy_returnsC <- na.omit(lag_signalsC * spread_diffC / lag_spreadC)
+
+
+# i) Cumulative P&L (Cumulative Profit and Loss)
+
+cumPnL_A <- cumprod(1 + strategy_returnsA) - 1
+cumPnL_B <- cumprod(1 + strategy_returnsB) - 1
+cumPnL_C <- cumprod(1 + strategy_returnsC) - 1
+
+plot(cumPnL_A, main = "Cumulative P&L for Visa & Mastercard", ylab = "Cumulative P&L")
+plot(cumPnL_B, main = "Cumulative P&L for Coca-Cola & Pepsi", ylab = "Cumulative P&L")
+plot(cumPnL_C, main = "Cumulative P&L for GLD & IAU", ylab = "Cumulative P&L Group C")
+
+
+# ii) Sharpe Ratio Calculation
+library(PerformanceAnalytics)
+
+# Group A
+strategy_returnsA_clean <- strategy_returnsA[is.finite(strategy_returnsA)]
+sharpe_A <- SharpeRatio.annualized(strategy_returnsA_clean, Rf = 0, scale = 12)
+
+# Group B
+strategy_returnsB_clean <- strategy_returnsB[is.finite(strategy_returnsB)]
+sharpe_B <- SharpeRatio.annualized(strategy_returnsB_clean, Rf = 0, scale = 12)
+
+# Group C
+strategy_returnsC_clean <- strategy_returnsC[is.finite(strategy_returnsC)]
+sharpe_C <- SharpeRatio.annualized(strategy_returnsC_clean, Rf = 0, scale = 12)
+
+# Print Results
+sharpe_A
+sharpe_B
+sharpe_C
+
+
+# iii) Maximum Drawdown
+mdd_A <- maxDrawdown(strategy_returnsA)
+mdd_B <- maxDrawdown(strategy_returnsB)
+mdd_C <- maxDrawdown(strategy_returnsC)
+
+mdd_A
+mdd_B
+mdd_C
+
+chart.Drawdown(strategy_returnsA, main = "Drawdown: Visa & Mastercard")
+chart.Drawdown(strategy_returnsB, main = "Drawdown: Coca-Cola & Pepsi")
+chart.Drawdown(strategy_returnsC, main = "Drawdown: GLD & IAU")
+
+# iv) Half-life
+library(egcm)
+
+half_life_A <- egcm(prices_V_MA$V, prices_V_MA$MA)$half.life
+half_life_B <- egcm(prices_KO_PEP$KO, prices_KO_PEP$PEP)$half.life
+half_life_C <- egcm(prices_GLD_IAU$GLD, prices_GLD_IAU$IAU)$half.life
+
+half_life_A
+half_life_B
+half_life_C
+
+# v) Winning Rate
+win_rate_A <- sum(strategy_returnsA > 0) / length(strategy_returnsA[strategy_returnsA != 0])
+win_rate_B <- sum(strategy_returnsB > 0) / length(strategy_returnsB[strategy_returnsB != 0])
+win_rate_C <- sum(strategy_returnsC > 0) / length(strategy_returnsC[strategy_returnsC != 0])
+
+win_rate_A
+win_rate_B
+win_rate_C
+
+
+
+# Loop for comparing strategy performance across different Z-score thresholds
+thresholds <- c(0.5, 0.7, 1.0, 1.5)
+results <- data.frame()
+
+for (th in thresholds) {
+  signals <- ifelse(z_scoreA < -th, 1, ifelse(z_scoreA > th, -1, 0))
+  signals <- xts(signals, order.by = index(z_scoreA))
+
+  lag_signals <- xts(dplyr::lag(coredata(signals), 1), order.by = index(signals))
+  lag_spread <- xts(dplyr::lag(coredata(spreadA), 1), order.by = index(spreadA))
+  spread_diff <- diff(spreadA)
+  strategy_returns <- na.omit(lag_signals * spread_diff / lag_spread)
+
+  sharpe <- SharpeRatio.annualized(strategy_returns, Rf = 0)
+  mdd <- maxDrawdown(strategy_returns)
+  win_rate <- sum(strategy_returns > 0) / length(strategy_returns[strategy_returns != 0])
+
+  results <- rbind(results, data.frame(Zscore=th, Sharpe=sharpe, MDD=mdd, WinRate=win_rate))
+}
+print(results)
+
+```
+
+
+
+### Summary of Performance Metrics (Visa & Mastercard)
+
+| Metric               | Value          |
+|----------------------|----------------|
+| Cumulative P&L       | 4.820%         |
+| Sharpe Ratio         | 0.740          |
+| Maximum Drawdown     | -3.210%        |
+| Half-life            | 8.50 days      |
+| Winning Rate         | 61.90%         |
+
+
+### Summary of Performance Metrics (Coca-Cola & Pepsi)
+
+| Metric               | Value          |
+|----------------------|----------------|
+| Cumulative P&L       | -1.23%         |
+| Sharpe Ratio         | -0.14          |
+| Maximum Drawdown     | -5.73%         |
+| Half-life            | 14.1 days      |
+| Winning Rate         | 48.2%          |
+
+
+# Summary of Performance Metrics (GLD & IAU)
+cat("\n### Summary of Performance Metrics (GLD & IAU)\n")
+cat("| Metric               | Value       |\n")
+cat("|----------------------|-------------|\n")
+cat(sprintf("| Cumulative P&L       | %.2f%%      |\n", last(cumPnL_C)*100))
+cat(sprintf("| Sharpe Ratio         | %.2f        |\n", sharpe_C))
+cat(sprintf("| Maximum Drawdown     | %.2f%%      |\n", mdd_C*100))
+cat(sprintf("| Half-life            | %.2f days   |\n", half_life_C))
+cat(sprintf("| Winning Rate         | %.1f%%      |\n", win_rate_C*100))
+
+
+
+
+## 6. Time-Frame-Based Performance Comparison
+
+To evaluate the robustness and stability of the pairs trading strategy under varying market conditions, the full sample period (2019–2024) was segmented into three distinct sub-periods. This temporal segmentation enables a more granular assessment of the strategy's performance across different economic environments and facilitates the identification of potential sensitivity to major external shocks, such as the COVID-19 pandemic and interest rate hikes. By re-estimating performance within each sub-period, we aim to determine whether the strategy demonstrates consistent efficacy or exhibits significant variation in response to macroeconomic events.
+
+```{r}
+# Define the sub-periods correctly:
+periods <- list(
+  list(start = as.Date("2019-01-01"), end = as.Date("2020-12-31")),
+  list(start = as.Date("2021-01-01"), end = as.Date("2022-12-31")),
+  list(start = as.Date("2023-01-01"), end = as.Date("2024-01-01"))
+)
+
+# Analysis Function per Group
+analyze_group <- function(prices, beta, const_term){
+  results <- data.frame()
+
+for (p in periods) {
+    prices_period <- window(prices, start = p$start, end = p$end)
+
+    spread <- prices_period[,1] - beta * prices_period[,2] - const_term
+    spread_mean <- rollapply(spread, width=12, FUN=mean, align="right", fill=NA)
+    spread_sd <- rollapply(spread, width=12, FUN=sd, align="right", fill=NA)
+    z_score <- (spread - spread_mean) / spread_sd
+
+    signals <- ifelse(z_score < -1, 1, ifelse(z_score > 1, -1, 0))
+    signals <- xts(signals, order.by=index(z_score))
+
+    lag_signals <- xts(dplyr::lag(coredata(signals),1), order.by=index(signals))
+    lag_spread <- xts(dplyr::lag(coredata(spread),1), order.by=index(spread))
+    spread_diff <- diff(spread)
+    strategy_returns <- na.omit(lag_signals * spread_diff / lag_spread)
+
+    metrics <- calculate_metrics(strategy_returns)
+
+    results <- rbind(results, metrics)
+}
+
+
+  colnames(results) <- c("Cumulative_PnL", "Sharpe_Ratio", "Max_Drawdown", "Win_Rate")
+  rownames(results) <- c("2019-2020", "2021-2022", "2023-2024")
+  return(results)
+}
+```
+
+# Group A (Visa & Mastercard)
+results_A <- analyze_group(prices_V_MA, beta = 0.5453, const_term = 23.6470)
+cat("\n### Performance Summary by Time Frame (Visa & Mastercard)\n")
+print(results_A)
+
+# Group B (Coca-Cola & Pepsi)
+results_B <- analyze_group(prices_KO_PEP, beta = 0.2682, const_term = 12.5970)
+cat("\n### Performance Summary by Time Frame (Coca-Cola & Pepsi)\n")
+print(results_B)
+
+# Group C (GLD & IAU)
+results_C <- analyze_group(prices_GLD_IAU, beta = beta_C, const_term = const_termC)
+cat("\n### Performance Summary by Time Frame (GLD & IAU)\n")
+print(results_C)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
