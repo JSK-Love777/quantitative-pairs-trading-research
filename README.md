@@ -61,6 +61,7 @@ The findings also highlighted important risks:
 **Financial Analytics:** Pairs Trading, Statistical Arbitrage, Backtesting, Financial Risk & Performance Evaluation
 
 ## Project Files
+| [Rendered R Analysis](results/pairs_trading_analysis.html) | HTML report containing R code outputs, statistical diagnostics, and visualizations |
 
 | File | Description |
 |---|---|
