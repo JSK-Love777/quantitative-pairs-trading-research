@@ -52,6 +52,18 @@ The findings also highlighted important risks:
 
 **Note:** Reported backtesting results are historical simulations, not realized trading profits. They have not been independently reproduced in this portfolio edition.
 
+
+### Interpretation & Reproducibility
+
+This repository documents the original research and analytical work completed as part of a collaborative university project.
+
+The reported performance figures reflect historical, spread-based simulations rather than realized investment returns. Transaction costs, slippage, and financing costs were not included.
+
+Supplementary experiments use different asset pairs and modeling assumptions and should not be directly compared with the main GLD/IAU backtest.
+
+The original R Markdown files and rendered HTML are provided as evidence of the analytical process. The full workflow has not been independently reproduced or validated as a production-ready trading strategy.
+
+
 ## Technical Skills Demonstrated
 
 **Programming:** R, R Markdown
